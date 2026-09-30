@@ -10,8 +10,8 @@
 
 var TZ = 'Asia/Kuala_Lumpur';
 var TAB = { KSSM: 'KSSM', IGCSE: 'IGCSE', SETTINGS: 'Settings' };
-var HEAD = ['Registered (MYT)', 'Name', 'Email', 'Phone', 'Timestamp (ms)'];
-var COL = { WHEN: 1, NAME: 2, EMAIL: 3, PHONE: 4, TS: 5 };
+var HEAD = ['Registered (MYT)', 'Name', 'Email', 'Phone', 'Timestamp (ISO)'];
+var COL = { WHEN: 1, NAME: 2, EMAIL: 3, PHONE: 4, ISO: 5 };
 
 var S = {
   KSSM_CAP: 'KSSM cap',
@@ -98,18 +98,7 @@ function toTime_(v, fallback) {
   return new Date(m[1] + '-' + m[2] + '-' + m[3] + 'T' + hh + ':' + m[5] + ':00+08:00').getTime();
 }
 
-// The timestamp column holds milliseconds since 1970 as a plain number, because a number is
-// the one thing Sheets cannot reinterpret. Column A is the readable copy for people.
-// Older rows, or cells Sheets has turned into dates, are still read as best they can be.
-function toMs_(v) {
-  if (v instanceof Date) return isNaN(v.getTime()) ? 0 : v.getTime();
-  var n = Number(v);
-  if (isFinite(n) && n > 1e12) return n;
-  var p = Date.parse(String(v));
-  return isNaN(p) ? 0 : p;
-}
-
-// Every claim in one tab: [{ name, email, phone, ms, iso }], in sheet order (oldest first).
+// Every claim in one tab: [{ name, email, phone, iso }], in sheet order (oldest first).
 function rows_(tabName) {
   var sh = book_().getSheetByName(tabName);
   var last = sh.getLastRow();
@@ -117,13 +106,11 @@ function rows_(tabName) {
   return sh.getRange(2, 1, last - 1, HEAD.length).getValues()
     .filter(function (r) { return String(r[COL.EMAIL - 1]).trim() !== ''; })
     .map(function (r) {
-      var ms = toMs_(r[COL.TS - 1]);
       return {
         name: String(r[COL.NAME - 1]),
         email: String(r[COL.EMAIL - 1]),
         phone: normPhoneCell_(r[COL.PHONE - 1]),
-        ms: ms,
-        iso: ms ? new Date(ms).toISOString() : ''
+        iso: String(r[COL.ISO - 1])
       };
     });
 }
@@ -185,7 +172,10 @@ function claim_(d) {
     var kssm = rows_(TAB.KSSM), igcse = rows_(TAB.IGCSE), all = kssm.concat(igcse);
 
     // Speed limit. No booth signs up this many people in a minute, so treat it as a script.
-    var recent = all.filter(function (r) { return r.ms > 0 && now - r.ms < 60000; }).length;
+    var recent = all.filter(function (r) {
+      var t = Date.parse(r.iso);
+      return !isNaN(t) && now - t < 60000;
+    }).length;
     if (cfg.rate > 0 && recent >= cfg.rate) {
       alert_(cfg, recent);
       return 'busy';
@@ -207,7 +197,7 @@ function claim_(d) {
       .setNumberFormat('@')   // plain text, so nothing a visitor types is ever read as a formula
       .setValues([[
         Utilities.formatDate(stamp, TZ, 'yyyy-MM-dd HH:mm:ss'),
-        clean.name, clean.email, clean.phoneNorm, String(now)
+        clean.name, clean.email, clean.phoneNorm, stamp.toISOString()
       ]]);
     SpreadsheetApp.flush();
     CacheService.getScriptCache().remove('status');
@@ -448,7 +438,6 @@ function goLive() {
   [TAB.KSSM, TAB.IGCSE].forEach(function (name) {
     var sh = ss.getSheetByName(name);
     if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, HEAD.length).clearContent();
-    sh.getRange(1, 1, 1, HEAD.length).setValues([HEAD]);
   });
   setSetting_(S.KSSM_CAP, 100);
   setSetting_(S.IGCSE_CAP, 100);

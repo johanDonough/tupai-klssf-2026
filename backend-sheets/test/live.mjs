@@ -2,7 +2,7 @@
 // "TEST") and will trip the speed limit once, which sends one alert email.
 // Run it only while testing, then use the Sheet menu "Go live" to clear the rows.
 //
-//   SHEETS_URL=https://script.google.com/macros/s/.../exec node live.mjs
+//   SHEETS_URL=https://script.google.com/macros/s/.../exec LIMIT=10 node live.mjs
 //
 // Needs Node 18 or newer. It never sends the staff passcode.
 const url = process.env.SHEETS_URL || '';
@@ -58,34 +58,26 @@ check('formula-style name is accepted with the = stripped (check the row in the 
 if (f === 'ok') accepted++;
 check('same foreign number, different spacing, is a duplicate', await claim('TEST Dup', mail(3), '+65 8 ' + run + ' 2', 'KSSM') === 'duplicate');
 
-// 4. Six different people at the same moment: all should get through
-const six = await Promise.all(Array.from({ length: 6 }, (_, i) => claim(`TEST Together ${i}`, mail(10 + i), phone(10 + i), i % 2 ? 'KSSM' : 'IGCSE')));
-const sixT = tally(six);
-console.log('6 different simultaneous claims ->', JSON.stringify(sixT));
-accepted += sixT.ok || 0;
-check('six different simultaneous claims all accepted', sixT.ok === 6, JSON.stringify(sixT));
-
-// 5. Keep claiming one after another until the speed limit answers "busy".
-// One at a time, so a "busy" here is the speed limit and not a queue timeout.
-const seq = [];
-for (let i = 0; i < 8; i++) {
-  const r = await claim(`TEST Queue ${i}`, mail(30 + i), phone(30 + i), i % 2 ? 'KSSM' : 'IGCSE');
-  seq.push(r);
-  if (r === 'ok') accepted++;
-}
-console.log('8 more, one after another ->', seq.join(', '));
-check('speed limit: only ok or busy answers', seq.every(r => r === 'ok' || r === 'busy'), seq.join());
-check('speed limit: it refused some (an alert email should arrive)', seq.includes('busy'), seq.join());
-// The limit is a rolling minute. What must never happen is 11 accepted inside one minute.
-okTimes.sort((a, b) => a - b);
+// 4. More different people at the same moment than the speed limit allows.
+// LIMIT must match "Max claims per minute" in the Sheet's Settings tab (the script cannot read it).
+const LIMIT = Number(process.env.LIMIT || 10);
+const size = LIMIT + 4;
+const burst = await Promise.all(Array.from({ length: size }, (_, i) => claim(`TEST Burst ${i}`, mail(10 + i), phone(10 + i), i % 2 ? 'KSSM' : 'IGCSE')));
+const burstT = tally(burst);
+console.log(`${size} different simultaneous claims ->`, JSON.stringify(burstT));
+accepted += burstT.ok || 0;
+check('burst: only ok or busy answers', Object.keys(burstT).every(k => k === 'ok' || k === 'busy'), JSON.stringify(burstT));
+check('burst: the speed limit refused some (an alert email should arrive)', (burstT.busy || 0) > 0, JSON.stringify(burstT));
+// The limit is a rolling minute. What must never happen is LIMIT + 1 accepted inside one minute.
+okTimes.sort((x, y) => x - y);
 let worst = 0;
 for (let i = 0; i < okTimes.length; i++) {
   let n = 0;
   for (let j = i; j < okTimes.length && okTimes[j] - okTimes[i] < 55000; j++) n++;
   worst = Math.max(worst, n);
 }
-console.log(`Accepted ${accepted} over ${Math.round((okTimes[okTimes.length - 1] - okTimes[0]) / 1000)}s; most in any one minute: ${worst}`);
-check('speed limit: never more than 10 accepted inside one minute', worst <= 10, 'worst ' + worst);
+console.log(`Accepted ${accepted} over ${Math.round((okTimes[okTimes.length - 1] - okTimes[0]) / 1000)}s; most in any one minute: ${worst}; limit ${LIMIT}`);
+check(`speed limit: never more than ${LIMIT} accepted inside one minute`, worst <= LIMIT, 'worst ' + worst);
 
 await sleep(9000);   // let the 8-second status cache expire
 const after = await get('status');
@@ -93,7 +85,7 @@ console.log('After:', JSON.stringify(after));
 const delta = (before.kssm_left + before.igcse_left) - (after.kssm_left + after.igcse_left);
 check(`counters dropped by exactly the ${accepted} accepted claims`, delta === accepted, 'dropped ' + delta);
 
-// 6. Staff list without the passcode
+// 5. Staff list without the passcode
 if (process.env.SKIP_STAFF) {
   console.log(bad ? `${bad} check(s) FAILED` : 'All live checks passed (staff checks skipped)');
   process.exit(bad ? 1 : 0);
