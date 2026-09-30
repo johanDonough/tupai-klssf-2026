@@ -17,6 +17,17 @@ class FakeDate extends Date {
   static now() { return clock; }
 }
 
+// When `mangle` is on, the fake Sheet behaves the way real Sheets can when it ignores the
+// plain-text format: date-like text becomes a date (read as local time, so the instant is
+// wrong), and digit strings and +numbers become numbers.
+let mangle = false;
+const mangled = v => {
+  if (!mangle || typeof v !== 'string') return v;
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(v)) return new Date(v.replace(/Z$/, '').replace(' ', 'T') + '-05:00');
+  if (/^\+?\d+$/.test(v)) return Number(v);
+  return v;
+};
+
 function makeSheet(name) {
   const cells = [];   // cells[r][c], zero-based
   const get = (r, c) => (cells[r] && cells[r][c] !== undefined ? cells[r][c] : '');
@@ -31,7 +42,7 @@ function makeSheet(name) {
     getRange(row, col, nr = 1, nc = 1) {
       const range = {
         getValues: () => Array.from({ length: nr }, (_, i) => Array.from({ length: nc }, (_, j) => get(row - 1 + i, col - 1 + j))),
-        setValues(v) { v.forEach((rr, i) => rr.forEach((val, j) => { (cells[row - 1 + i] ||= [])[col - 1 + j] = val; })); return range; },
+        setValues(v) { v.forEach((rr, i) => rr.forEach((val, j) => { (cells[row - 1 + i] ||= [])[col - 1 + j] = mangled(val); })); return range; },
         setValue(val) { (cells[row - 1] ||= [])[col - 1] = val; return range; },
         setNumberFormat() { return range; },
         setFontWeight() { return range; },
@@ -134,7 +145,7 @@ const P = '+60 12-345 6789';
 
 ctx.setupSheet();
 ok('setup creates the three tabs', !!sheets.KSSM && !!sheets.IGCSE && !!sheets.Settings);
-ok('setup writes headers', sheets.KSSM._cells[0].join() === 'Registered (MYT),Name,Email,Phone,Timestamp (ISO)');
+ok('setup writes headers', sheets.KSSM._cells[0].join() === 'Registered (MYT),Name,Email,Phone,Timestamp (ms)');
 ok('setup fills the alert email with the owner', sheets.Settings._cells[6][1] === 'owner@tupai.ai', JSON.stringify(sheets.Settings._cells[6]));
 ok('setup remembers the sheet id', propStore.SHEET_ID === 'sheet-id-123');
 ctx.setupSheet();
@@ -186,7 +197,7 @@ ok('invalid claims write nothing', s.kssm_left === 100 && s.igcse_left === 100);
 
 ok('ok: MY mobile with leading 0', claim('  Sample   Parent 01 ', 'A@Example.com', '+60 012-345 6789', 'KSSM') === 'ok');
 const r1 = sheets.KSSM._cells[1];
-ok('row is stored trimmed, normalised, with MYT time', r1[0] === '2026-10-02 10:00:03' && r1[1] === 'Sample Parent 01' && r1[2] === 'A@Example.com' && r1[3] === '+60123456789' && r1[4] === '2026-10-02T02:00:03.000Z', JSON.stringify(r1));
+ok('row is stored trimmed, normalised, with MYT time', r1[0] === '2026-10-02 10:00:03' && r1[1] === 'Sample Parent 01' && r1[2] === 'A@Example.com' && r1[3] === '+60123456789' && r1[4] === String(Date.parse('2026-10-02T02:00:03.000Z')), JSON.stringify(r1));
 tick(7000);
 ok('duplicate: email, different case', claim('Other', 'a@example.COM', '+60 19-999 9999', 'KSSM') === 'duplicate');
 ok('duplicate: phone, different format', claim('Other', 'b@example.com', '+60 123456789', 'KSSM') === 'duplicate');
@@ -266,6 +277,7 @@ a = post({ action: 'admin', passcode: 'TEST-PASS-123' });
 ok('staff: correct passcode returns both lists', a.ok === true && a.kssm.length === 2 && a.igcse.length > 5 && a.kssm_cap === 100, JSON.stringify(a).slice(0, 160));
 ok('staff: row has name, email, phone, created_at only', Object.keys(a.kssm[0]).sort().join() === 'created_at,email,name,phone', JSON.stringify(a.kssm[0]));
 ok('staff: newest first', a.kssm[0].name === 'K Two' && a.kssm[1].name === 'Sample Parent 01', a.kssm.map(r => r.name).join());
+ok('staff: created_at is the true instant, as ISO', a.kssm[1].created_at === '2026-10-02T02:00:03.000Z', a.kssm[1].created_at);
 ok('staff: passcode must be a string', post({ action: 'admin', passcode: { $ne: 1 } }).reason === 'wrong');
 ctx.unlockStaff();
 for (let i = 4; i >= 1; i--) {
@@ -322,6 +334,32 @@ clock = Date.parse('2026-10-02T00:00:01Z');
 ok('after Go live, the first real claim on Friday lands in row 2', claim('First Real', 'first@example.com', P, 'KSSM') === 'ok' && sheets.KSSM._cells[1][1] === 'First Real');
 ctx.testAlert();
 ok('test alert email is sent', mails[mails.length - 1].subject === 'Tupai KLSSF: test alert');
+
+// ---------------------------------------------------------------- Sheets reinterpreting cells
+// The live Sheet let 15 claims through in 31 seconds because the timestamp it handed back
+// could not be read. These run the same rules with the fake Sheet mangling what it stores.
+
+mangle = true;
+alertAnswer = 'YES'; ctx.goLive();
+clock = Date.parse('2026-10-03T04:00:00Z');
+setting('Max claims per minute', '4');
+mails.length = 0;
+propStore.LAST_ALERT && delete propStore.LAST_ALERT;
+const m1 = [];
+for (let i = 0; i < 7; i++) { tick(2000); m1.push(claim('Mangle ' + i, `mangle${i}@example.com`, `+60 12-777 00${10 + i}`, i % 2 ? 'KSSM' : 'IGCSE')); }
+ok('mangled cells: speed limit still holds', m1.join() === 'ok,ok,ok,ok,busy,busy,busy', m1.join());
+ok('mangled cells: alert still sent', mails.length === 1);
+ok('mangled cells: the fake really did mangle', typeof sheets.IGCSE._cells[1][3] === 'number' && sheets.IGCSE._cells[1][0] instanceof Date && typeof sheets.IGCSE._cells[1][4] === 'number', JSON.stringify(sheets.IGCSE._cells[1]));
+tick(61000);
+ok('mangled cells: duplicate phone still caught', claim('Mangle Dup', 'mdup@example.com', '+60 012 777 0010', 'KSSM') === 'duplicate');
+ok('mangled cells: duplicate email still caught', claim('Mangle Dup', 'MANGLE1@example.com', '+60 12-777 0099', 'KSSM') === 'duplicate');
+a = post({ action: 'admin', passcode: 'TEST-PASS-123' });
+ok('mangled cells: staff list shows the true time and phone', a.ok === true && a.igcse[a.igcse.length - 1].created_at === '2026-10-03T04:00:02.000Z' && a.igcse[a.igcse.length - 1].phone === '+60127770010', JSON.stringify(a.igcse[a.igcse.length - 1]));
+// a row written by the first version of the script (ISO text in the last column)
+sheets.KSSM._cells.push(['2026-10-03 12:30:00', 'Old Format', 'old@example.com', '+60120000001', '2026-10-03T04:30:00.000Z']);
+a = post({ action: 'admin', passcode: 'TEST-PASS-123' });
+ok('rows from the first version of the script are still read', a.kssm.some(r => r.name === 'Old Format' && r.created_at === '2026-10-03T04:30:00.000Z'));
+mangle = false;
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -3,11 +3,11 @@ window.KLSSF_CONFIG = {
   // 'demo'     = no backend. Claims are kept in this browser only (localStorage).
   // 'sheets'   = live, Google Sheet. Calls the web app in backend-sheets/Code.gs.
   // 'supabase' = live, database. Calls the functions in backend/schema.sql.
-  mode: 'demo',
+  mode: 'sheets',
 
   // 'sheets' mode: the web app URL from Apps Script (Deploy > Manage deployments).
   // It ends in /exec. It is public by design; the script decides what it will answer.
-  sheetsUrl: '',
+  sheetsUrl: 'https://script.google.com/macros/s/AKfycby0XTQNsDggOoQGzA6TYXhAfSyYqBM6aexSioKTW4jaE-npNf9bUp900B3RFbrJa0iN/exec',
 
   // 'supabase' mode only. Both values are public by design.
   supabaseUrl: '',      // e.g. https://abcdefgh.supabase.co
