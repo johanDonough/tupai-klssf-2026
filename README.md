@@ -31,7 +31,7 @@ Every rule is enforced by the backend. The page repeats the checks only for fast
 | Time window | Fri 2 Oct 08:00 to midnight at the end of Sun 4 Oct, Malaysia time. |
 | Phone | `+60`: Malaysian mobile, 9 or 10 digits starting with 1. Any other country code: 6 to 12 digits, 15 in total at most. |
 | Consent | Must be ticked. Wording addresses the parent or guardian. |
-| Speed limit | More than 10 accepted claims in a minute: further claims are asked to try again shortly, and an alert email is sent. |
+| Speed limit | Set in the Sheet's Settings tab (15 a minute for the event). Beyond it, further claims are asked to try again shortly, and an alert email is sent. |
 | No formulas | A name or email cannot begin with `=`, `+`, `-` or `@`, and every cell is written as plain text. |
 | Staff passcode | Checked by the backend against a salted hash. Five wrong tries lock the staff view for 5 minutes. |
 | Timestamp | Set by the backend, not by the browser. |
@@ -60,6 +60,8 @@ node test-code.mjs
 ```
 
 96 checks run `Code.gs` against a fake of the Google services: the window, every validation rule, duplicates, the cap, the speed limit and alert, the passcode and lockout, the QR upload, and the menu actions. They prove the logic, not how the real Sheets service behaves, so the live checks in `SETUP.md` still matter.
+
+Two more scripts run against the real Sheet while it is in test mode: `live.mjs` (refusals, simultaneous identical claims, the speed limit, the passcode) and `cap.mjs` (more simultaneous claims than accounts left). Both passed on 30 Sept 2026. They write rows named "TEST…", which the Sheet's "Go live" menu clears.
 
 ## Known limits
 
