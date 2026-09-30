@@ -124,7 +124,8 @@ set search_path = public, extensions
 as $$
 declare
   cfg       public.event_config%rowtype;
-  v_name    text := btrim(coalesce(p_name, ''));
+  -- A name or email may not begin with = + - or @ (what a spreadsheet formula needs).
+  v_name    text := btrim(regexp_replace(regexp_replace(coalesce(p_name, ''), '^[\s=+\-@]+', ''), '\s+', ' ', 'g'));
   v_email   text := btrim(coalesce(p_email, ''));
   v_phone   text := btrim(coalesce(p_phone, ''));
   v_cc      text;
@@ -141,7 +142,7 @@ begin
   if now() >= cfg.closes_at then return 'closed'; end if;
 
   if char_length(v_name) < 2 or char_length(v_name) > 100 then return 'invalid'; end if;
-  if char_length(v_email) > 254 or v_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then return 'invalid'; end if;
+  if char_length(v_email) > 254 or v_email !~ '^[A-Za-z0-9][^@\s]*@[^@\s]+\.[^@\s]+$' then return 'invalid'; end if;
   if p_syllabus is null or p_syllabus not in ('KSSM', 'IGCSE') then return 'invalid'; end if;
   if p_consent is not true then return 'invalid'; end if;
 

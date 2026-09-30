@@ -1,14 +1,15 @@
-// Demo backend. Same three calls and same answers as the live database,
-// but everything is kept in this browser's localStorage. Nothing leaves the device.
+// Demo backend. Same calls and same answers as the live backends, but everything
+// is kept in this browser's localStorage. Nothing leaves the device.
 window.KlssfDemoApi = (function () {
   'use strict';
   var CFG = window.KLSSF_CONFIG.demo;
   var V = window.KlssfValidate;
   var KEY = 'tupai_klssf_demo_v1';
+  var FIVE_MIN = 5 * 60 * 1000;
   var memory = null;   // used when localStorage is unavailable
 
   function fresh() {
-    return { kssm: [], igcse: [], fails: [], state: 'open', kssmCap: CFG.kssmCap, igcseCap: CFG.igcseCap };
+    return { kssm: [], igcse: [], fails: [], state: 'open', kssmCap: CFG.kssmCap, igcseCap: CFG.igcseCap, qr: null };
   }
   function load() {
     try {
@@ -30,7 +31,8 @@ window.KlssfDemoApi = (function () {
       igcse_cap: s.igcseCap,
       kssm_left: Math.max(s.kssmCap - s.kssm.length, 0),
       igcse_left: Math.max(s.igcseCap - s.igcse.length, 0),
-      state: s.state
+      state: s.state,
+      qr_version: s.qr ? s.qr.version : ''
     };
   }
 
@@ -54,37 +56,65 @@ window.KlssfDemoApi = (function () {
       var list = d.syllabus === 'KSSM' ? s.kssm : s.igcse;
       var cap = d.syllabus === 'KSSM' ? s.kssmCap : s.igcseCap;
       if (list.length >= cap) return 'full';
-      list.push({ name: d.name.trim(), email: d.email.trim(), phone: phoneNorm, created_at: new Date().toISOString() });
+      list.push({ name: V.cleanName(d.name), email: d.email.trim(), phone: phoneNorm, created_at: new Date().toISOString() });
       save(s);
       return 'ok';
     })();
     return wait(700, result);
   }
 
-  function adminList(passcode) {
-    var s = load();
+  // Returns null if the passcode is right, or the refusal to send back. Saves the failed-try count.
+  function refuse(s, passcode) {
     var now = Date.now();
-    var FIVE_MIN = 5 * 60 * 1000;
     s.fails = (s.fails || []).filter(function (t) { return now - t < FIVE_MIN; });
-    var answer;
     if (s.fails.length >= 5) {
       var fifth = s.fails.slice().sort(function (a, b) { return b - a; })[4];
-      answer = { ok: false, reason: 'locked', retry_seconds: Math.ceil((fifth + FIVE_MIN - now) / 1000) };
-    } else if (passcode !== CFG.passcode) {
+      return { ok: false, reason: 'locked', retry_seconds: Math.ceil((fifth + FIVE_MIN - now) / 1000) };
+    }
+    if (passcode !== CFG.passcode) {
       s.fails.push(now);
-      answer = s.fails.length >= 5
+      save(s);
+      return s.fails.length >= 5
         ? { ok: false, reason: 'locked', retry_seconds: 300 }
         : { ok: false, reason: 'wrong', tries_left: 5 - s.fails.length };
-    } else {
-      s.fails = [];
-      var newestFirst = function (a, b) { return a.created_at < b.created_at ? 1 : -1; };
-      answer = {
-        ok: true, kssm_cap: s.kssmCap, igcse_cap: s.igcseCap,
-        kssm: s.kssm.slice().sort(newestFirst), igcse: s.igcse.slice().sort(newestFirst)
-      };
     }
+    s.fails = [];
+    return null;
+  }
+
+  function adminList(passcode) {
+    var s = load();
+    var no = refuse(s, passcode);
+    if (no) return wait(400, no);
     save(s);
-    return wait(400, answer);
+    var newestFirst = function (a, b) { return a.created_at < b.created_at ? 1 : -1; };
+    return wait(400, {
+      ok: true, kssm_cap: s.kssmCap, igcse_cap: s.igcseCap,
+      kssm: s.kssm.slice().sort(newestFirst), igcse: s.igcse.slice().sort(newestFirst)
+    });
+  }
+
+  function getQr() {
+    var s = load();
+    return wait(150, s.qr ? { version: s.qr.version, data_url: s.qr.data_url } : { version: '', data_url: null });
+  }
+  function setQr(passcode, dataUrl) {
+    var s = load();
+    var no = refuse(s, passcode);
+    if (no) return wait(300, no);
+    if (!/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(String(dataUrl || ''))) return wait(300, { ok: false, reason: 'bad_image' });
+    if (dataUrl.length > 240000) return wait(300, { ok: false, reason: 'too_large' });
+    s.qr = { version: String(Date.now()), data_url: dataUrl };
+    save(s);
+    return wait(500, { ok: true, version: s.qr.version });
+  }
+  function clearQr(passcode) {
+    var s = load();
+    var no = refuse(s, passcode);
+    if (no) return wait(300, no);
+    s.qr = null;
+    save(s);
+    return wait(300, { ok: true, version: '' });
   }
 
   // ---- helpers for the demo panel only (not part of the live API)
@@ -112,6 +142,7 @@ window.KlssfDemoApi = (function () {
 
   return {
     getStatus: getStatus, claim: claim, adminList: adminList,
+    getQr: getQr, setQr: setQr, clearQr: clearQr,
     demo: { seed: seed, setState: setState, unlockStaff: unlockStaff, peek: peek, passcode: CFG.passcode }
   };
 })();

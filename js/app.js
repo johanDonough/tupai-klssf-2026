@@ -11,8 +11,11 @@
   var T = window.COPY;
   var V = window.KlssfValidate;
   var COUNTRIES = window.KLSSF_COUNTRIES;
-  var DEMO = CFG.mode !== 'supabase';
-  var api = DEMO ? window.KlssfDemoApi : window.KlssfSupabaseApi;
+  var MODE = CFG.mode === 'sheets' || CFG.mode === 'supabase' ? CFG.mode : 'demo';
+  var DEMO = MODE === 'demo';
+  var api = MODE === 'sheets' ? window.KlssfSheetsApi
+          : MODE === 'supabase' ? window.KlssfSupabaseApi
+          : window.KlssfDemoApi;
   var LOGO = CFG.logo || 'assets/parent-app-logo.svg';
 
   var $app = document.getElementById('app');
@@ -62,6 +65,9 @@
   var blockedKind = null;
   var staff = null;           // { passcode, data, tab, query }. Memory only.
   var paintedMode = null;
+  var qr = { version: '', dataUrl: null };   // the uploaded booth QR image, if there is one
+  var qrLoading = false;
+  var qrCheck = null;                        // result of reading the last uploaded image
   var pollTimer = null, countTimer = null, toastTimer = null;
   var modalCleanup = null;
 
@@ -87,12 +93,32 @@
   function refreshStatus() {
     return api.getStatus().then(function (s) {
       if (s && typeof s.kssm_left === 'number') status = s;
+      syncQr();
       onStatus();
       return status;
     }, function () {
       return status;   // keep the last numbers; the next cycle tries again
     });
   }
+  // Staff can upload a QR image. Fetch it only when its version changes.
+  function isImageUrl(u) { return typeof u === 'string' && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(u); }
+  function syncQr() {
+    if (!api.getQr || !status || typeof status.qr_version !== 'string') return;
+    if (status.qr_version === qr.version || qrLoading) return;
+    if (status.qr_version === '') {
+      qr = { version: '', dataUrl: null };
+      if (view === 'landing') paintLanding();
+      return;
+    }
+    qrLoading = true;
+    api.getQr().then(function (r) {
+      qrLoading = false;
+      if (!r || !isImageUrl(r.data_url)) return;
+      qr = { version: String(r.version || ''), dataUrl: r.data_url };
+      if (view === 'landing') paintLanding();
+    }, function () { qrLoading = false; });
+  }
+
   function onStatus() {
     if (view === 'landing') paintLanding();
     else if (view === 'form') paintFormStatus();
@@ -149,6 +175,11 @@
     return code.createSvgTag({ cellSize: 8, margin: 0, scalable: true });
   }
 
+  // The uploaded image if staff have set one, otherwise a QR drawn by the page.
+  function qrHtml() {
+    return qr.dataUrl ? '<img src="' + qr.dataUrl + '" alt="">' : qrSvg(registerUrl());
+  }
+
   function showLanding() {
     setView('landing');
     paintedMode = null;
@@ -176,13 +207,14 @@
   function paintLanding() {
     paintCounters($app);
     var m = mode();
-    if (m === paintedMode) return;
-    paintedMode = m;
+    var key = m + '|' + qr.version;
+    if (key === paintedMode) return;
+    paintedMode = key;
     var slot = q('[data-action]', $app);
     if (m === 'loading') { slot.innerHTML = ''; return; }
     if (m !== 'open') { slot.innerHTML = noticeHtml(m); return; }
     slot.innerHTML =
-      '<div class="qr" role="img" aria-label="QR code to the registration form">' + qrSvg(registerUrl()) + '</div>' +
+      '<div class="qr" role="img" aria-label="QR code to the registration form">' + qrHtml() + '</div>' +
       '<div class="scan"><div class="scan__en">' + esc(T.landing.scan.en) + '</div>' +
       '<div class="scan__bm">' + esc(T.landing.scan.bm) + '</div></div>' +
       '<a class="btn btn--primary btn--full btn--display" href="#/register?booth=1">' +
@@ -422,7 +454,7 @@
       });
       return;
     }
-    setError('form', T.errors.generic);
+    setError('form', result === 'busy' ? T.errors.busy : T.errors.generic);
   }
 
   function goHome() {
@@ -615,6 +647,7 @@
         '</header>' +
         '<div class="admin__body">' +
           '<div class="kpis" data-kpis></div>' +
+          (api.setQr ? '<section class="qrcard" data-qrcard></section>' : '') +
           '<div class="lists">' +
             '<div class="lists__bar">' +
               '<div class="tabs" role="tablist" data-tabs></div>' +
@@ -639,6 +672,126 @@
     q('[data-query]', $app).addEventListener('input', function (e) { staff.query = e.target.value; paintList(); });
     q('[data-refresh]', $app).addEventListener('click', refreshAdmin);
     paintAdmin();
+    paintQrCard();
+  }
+
+  // ---- booth QR: staff upload the image that visitors scan
+
+  function paintQrCard(note) {
+    var card = q('[data-qrcard]', $app);
+    if (!card) return;
+    var link = registerUrl();
+    var checkLine = '';
+    if (qr.dataUrl && qrCheck) {
+      checkLine = qrCheck.state === 'match' ? '<div class="qrcard__ok">' + esc(T.admin.qrMatch) + '</div>'
+        : qrCheck.state === 'mismatch' ? '<div class="qrcard__warn">' + esc(fill(T.admin.qrMismatch, { url: qrCheck.url })) + '</div>'
+        : '<div class="qrcard__hint">' + esc(T.admin.qrUnread) + '</div>';
+    } else if (qr.dataUrl) {
+      checkLine = '<div class="qrcard__hint">' + esc(T.admin.qrUnread) + '</div>';
+    }
+    card.innerHTML =
+      '<div class="qrcard__preview">' + qrHtml() + '</div>' +
+      '<div class="qrcard__body">' +
+        '<div class="kpi__label">' + esc(T.admin.qrTitle.toUpperCase()) + '</div>' +
+        '<div class="qrcard__state">' + esc(qr.dataUrl ? T.admin.qrCustom : T.admin.qrAuto) + '</div>' +
+        checkLine +
+        (note ? '<div class="qrcard__warn">' + esc(note) + '</div>' : '') +
+        '<div class="qrcard__link"><span class="qrcard__hint">' + esc(T.admin.qrLinkLabel) + '</span>' +
+          '<code>' + esc(link) + '</code></div>' +
+        '<div class="qrcard__actions">' +
+          '<button type="button" class="btn btn--secondary" data-qr-upload>' + esc(qr.dataUrl ? T.admin.qrReplace : T.admin.qrUpload) + '</button>' +
+          (qr.dataUrl ? '<button type="button" class="btn btn--secondary" data-qr-remove>' + esc(T.admin.qrRemove) + '</button>' : '') +
+          '<button type="button" class="btn btn--secondary" data-qr-copy>' + esc(T.admin.qrCopy) + '</button>' +
+          '<input type="file" accept="image/*" data-qr-file hidden>' +
+        '</div>' +
+      '</div>';
+    var file = q('[data-qr-file]', card);
+    q('[data-qr-upload]', card).addEventListener('click', function () { file.click(); });
+    file.addEventListener('change', function () { if (file.files && file.files[0]) uploadQr(file.files[0]); });
+    var remove = q('[data-qr-remove]', card);
+    if (remove) remove.addEventListener('click', removeQr);
+    q('[data-qr-copy]', card).addEventListener('click', function () {
+      var done = function () { toast(T.admin.qrCopied, 'check'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(done, function () {});
+    });
+  }
+  function qrBusy(on) {
+    qa('[data-qrcard] button', $app).forEach(function (b) { b.disabled = on; });
+    var up = q('[data-qr-upload]', $app);
+    if (up && on) up.textContent = T.admin.qrSaving;
+  }
+
+  // Redraw the chosen file as a PNG no larger than 720px, so it is small and cannot carry anything but pixels.
+  function readImage(fileObj) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onerror = function () { reject(new Error('bad')); };
+      reader.onload = function () {
+        var img = new Image();
+        img.onerror = function () { reject(new Error('bad')); };
+        img.onload = function () {
+          var w = img.naturalWidth || img.width || 720, h = img.naturalHeight || img.height || 720;
+          if (!w || !h) { reject(new Error('bad')); return; }
+          var scale = Math.min(1, 720 / Math.max(w, h));
+          var canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(w * scale));
+          canvas.height = Math.max(1, Math.round(h * scale));
+          var c = canvas.getContext('2d');
+          c.fillStyle = '#fff';
+          c.fillRect(0, 0, canvas.width, canvas.height);
+          c.drawImage(img, 0, 0, canvas.width, canvas.height);
+          var url = canvas.toDataURL('image/png');
+          if (url.length > 230000) url = canvas.toDataURL('image/jpeg', 0.9);
+          if (url.length > 230000) { reject(new Error('big')); return; }
+          resolve({ url: url, canvas: canvas });
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(fileObj);
+    });
+  }
+  // Where the browser can read QR codes itself, check the image opens the form.
+  function readQrLink(canvas) {
+    if (!('BarcodeDetector' in window)) return Promise.resolve(null);
+    try {
+      return new window.BarcodeDetector({ formats: ['qr_code'] }).detect(canvas).then(function (found) {
+        return found && found[0] ? String(found[0].rawValue || '') : null;
+      }, function () { return null; });
+    } catch (e) { return Promise.resolve(null); }
+  }
+  function uploadQr(fileObj) {
+    qrBusy(true);
+    readImage(fileObj).then(function (img) {
+      return readQrLink(img.canvas).then(function (found) {
+        return api.setQr(staff.passcode, img.url).then(function (r) {
+          if (view !== 'admin' || !staff) return;
+          if (!r || !r.ok) { paintQrCard(r && r.reason === 'too_large' ? T.admin.qrTooBig : T.admin.qrFailed); return; }
+          qr = { version: String(r.version || ''), dataUrl: img.url };
+          qrCheck = found == null ? { state: 'unread' }
+            : found.replace(/\/+$/, '') === registerUrl().replace(/\/+$/, '') ? { state: 'match' }
+            : { state: 'mismatch', url: found.slice(0, 200) };
+          if (status) status.qr_version = qr.version;
+          paintQrCard();
+          toast(T.admin.qrSaved, 'check');
+        });
+      });
+    }).catch(function (err) {
+      if (view !== 'admin') return;
+      var msg = err && err.message === 'big' ? T.admin.qrTooBig : err && err.message === 'bad' ? T.admin.qrBad : T.admin.qrFailed;
+      paintQrCard(msg);
+    });
+  }
+  function removeQr() {
+    qrBusy(true);
+    api.clearQr(staff.passcode).then(function (r) {
+      if (view !== 'admin' || !staff) return;
+      if (!r || !r.ok) { paintQrCard(T.admin.qrFailed); return; }
+      qr = { version: '', dataUrl: null };
+      qrCheck = null;
+      if (status) status.qr_version = '';
+      paintQrCard();
+      toast(T.admin.qrRemoved, 'check');
+    }, function () { if (view === 'admin') paintQrCard(T.admin.qrFailed); });
   }
   function rowsOf(tab) { return staff.data[tab === 'KSSM' ? 'kssm' : 'igcse'] || []; }
   function paintAdmin() {

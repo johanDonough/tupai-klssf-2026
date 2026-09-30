@@ -2,23 +2,13 @@
 
 A single-URL page for Tupai's booth at the KL Seni & STEM Festival (KLCC Park Esplanade, Fri 2 to Sun 4 Oct 2026).
 
-Tupai is giving away **up to 100 KSSM and up to 100 IGCSE accounts** (Family Duo, 1 year), claimed at the booth. The page shows how many of each are left, lets a visitor claim one through a short form, and gives staff a passcode-protected list with CSV export.
+Tupai is giving away **up to 100 KSSM and up to 100 IGCSE accounts** (Family Duo, 1 year). The page shows how many of each are left, lets a visitor claim one through a short form, and gives staff a passcode-protected list with CSV export and a place to upload the booth's QR code.
 
-**Status: the front end is finished and runs in demo mode. The live backend is written and tested locally, but not deployed.** Deploying it is the handover (see "Going live").
+## How it fits together
 
-## Try the demo (no setup)
-
-Serve the folder and open it. Any static server works:
-
-```bash
-python -m http.server 8026
-```
-
-Then open http://localhost:8026. On Windows, double-clicking `start-demo.bat` does both steps.
-
-- Demo mode keeps claims in the browser's localStorage only. Nothing leaves the device, and two devices do not share counts.
-- The **DEMO** pill (bottom-left) loads sample data and switches the registration window between before, open and closed.
-- Staff view: **double-click the logo**, passcode `demo`.
+- **The page** is plain HTML, CSS and JavaScript with no build step. It is hosted on GitHub Pages.
+- **The record** is a Google Sheet with a KSSM tab and an IGCSE tab. A script attached to the Sheet (`backend-sheets/Code.gs`) is the only thing that reads or writes it. Setup steps: [`backend-sheets/SETUP.md`](backend-sheets/SETUP.md).
+- `js/config.js` says which backend the page talks to: `demo`, `sheets` or `supabase`.
 
 ## Screens
 
@@ -28,116 +18,82 @@ Then open http://localhost:8026. On Windows, double-clicking `start-demo.bat` do
 | `#/register` | Claim form on the visitor's own phone. This is what the QR code opens. |
 | `#/register?booth=1` | Same form on the booth device. After success it shows "Next visitor" and returns to the landing page after 10 seconds. |
 
-Success, blocked (already claimed, not open yet, closed, all claimed) and staff screens are shown in place and cannot be reached by address. All visitor-facing copy is English with Bahasa Malaysia beneath, in `js/copy.js`.
+Success, blocked (already claimed, not open yet, closed, all claimed) and staff screens are shown in place and cannot be reached by address. The staff view opens with a **double-click on the logo**. All visitor-facing copy is English with Bahasa Malaysia beneath, in `js/copy.js`.
 
-## Going live
+## Rules
 
-The live backend is Postgres behind Supabase's REST endpoint. About 20 minutes.
-
-1. **Create a Supabase project** (or use an existing Tupai one).
-2. **Run `backend/schema.sql`** in the SQL editor. It creates the tables and functions and locks the tables down.
-3. **Set the staff passcode** in the SQL editor. Johan has the passcode; do not commit it anywhere. Only a bcrypt hash is stored.
-   ```sql
-   select public.set_admin_passcode('THE-PASSCODE');
-   ```
-4. **Run `backend/test-mode.sql`**. It opens registration now and sets the KSSM cap to 3 so "full" is easy to reach.
-5. **Edit `js/config.js`**: set `mode: 'supabase'`, `supabaseUrl` and `supabaseAnonKey`. Both values are public by design.
-6. **Host the folder** on any static host over HTTPS. There is no build step.
-7. **Test** (see "What to test on the live setup").
-8. **Run `backend/go-live.sql`**. It deletes all test claims, restores both caps to 100 and sets the real window. After this the page shows "Registration opens Friday 2 October, 8am" until then. That is correct.
-9. **Print the QR code only now**, from the live landing page. The QR encodes `<live URL>#/register`, so the URL must not change after printing.
-
-Registration window (set in `event_config`): **Fri 2 Oct 08:00 to Mon 5 Oct 00:00 MYT**, continuous.
-
-## Rules, and where each is enforced
-
-Everything that matters is enforced in the database (`claim_account()` in `backend/schema.sql`). The browser repeats the checks only for fast feedback (`js/validate.js`).
+Every rule is enforced by the backend. The page repeats the checks only for fast feedback (`js/validate.js`).
 
 | Rule | Detail |
 |---|---|
-| Hard cap | 100 per syllabus. Checked under a transaction-level advisory lock, so two simultaneous claims cannot both take the last account. |
-| No duplicates | Same email (case-insensitive) or same phone number cannot claim twice, across both lists. |
-| Time window | Claims outside `opens_at` to `closes_at` are refused. |
-| Phone | `+60`: Malaysian mobile, 9 or 10 digits starting with 1. Any other country code: 6 to 12 digits, 15 in total at most. Stored as `+<digits>`. |
+| Hard cap | 100 per syllabus. Claims are processed one at a time under a lock, so two people cannot both take the last account. |
+| No duplicates | The same email (any capitalisation) or the same phone number cannot claim twice, across both lists. |
+| Time window | Fri 2 Oct 08:00 to midnight at the end of Sun 4 Oct, Malaysia time. |
+| Phone | `+60`: Malaysian mobile, 9 or 10 digits starting with 1. Any other country code: 6 to 12 digits, 15 in total at most. |
 | Consent | Must be ticked. Wording addresses the parent or guardian. |
-| No public reads | RLS is on for every table with **no policies**, and table privileges are revoked from `anon`. The public key can only call three functions. |
-| Staff passcode | Checked in the database against a bcrypt hash. Never in the front end. 5 wrong tries from one IP locks that IP out for 5 minutes. |
-| Timestamp | Set by the database (`created_at`), not by the browser. |
+| Speed limit | More than 10 accepted claims in a minute: further claims are asked to try again shortly, and an alert email is sent. |
+| No formulas | A name or email cannot begin with `=`, `+`, `-` or `@`, and every cell is written as plain text. |
+| Staff passcode | Checked by the backend against a salted hash. Five wrong tries lock the staff view for 5 minutes. |
+| Timestamp | Set by the backend, not by the browser. |
 
-## API contract
+## Booth QR code
 
-`js/api.supabase.js` calls three Postgres functions through `POST <supabaseUrl>/rest/v1/rpc/<name>`. If you would rather use another backend, implement the same three calls and point `js/app.js` at it.
+The landing page draws its own QR code for the registration link. Staff can replace it with their own image: staff view > **Booth QR code** > **Upload QR image**. The card shows the exact link the QR must open. The uploaded image is redrawn as a small PNG in the browser and stored by the backend, so every booth screen shows the same one.
 
-```
-get_status()
-  -> { kssm_cap, igcse_cap, kssm_left, igcse_left, state: "before" | "open" | "closed" }
+Use a plain (static) QR code. A "dynamic" code from a QR website sends every visitor through that company's servers, and free plans can carry scan limits or an advert page.
 
-claim_account(p_name, p_email, p_phone, p_syllabus, p_consent)
-  p_phone is "+<country code> <national number>", e.g. "+60 12-345 6789"
-  p_syllabus is "KSSM" or "IGCSE"
-  -> "ok" | "duplicate" | "full" | "not_open" | "closed" | "invalid"
+## Run it locally
 
-admin_list(p_passcode)
-  -> { ok: true, kssm_cap, igcse_cap, kssm: [row], igcse: [row] }      row = { name, email, phone, created_at }, newest first
-   | { ok: false, reason: "wrong", tries_left }
-   | { ok: false, reason: "locked", retry_seconds }
+```bash
+python -m http.server 8026
 ```
 
-## What has been tested
+Then open http://localhost:8026. On Windows, double-clicking `start-demo.bat` does both steps.
 
-- **Database logic: 73 checks pass** against an in-process Postgres (PGlite). Covers the lock-down, the window, every validation rule, duplicates, the cap, the passcode hash, the lockout, and both SQL scripts.
-  ```bash
-  cd backend/test
-  npm install
-  npm test
-  ```
-- **Front end, in demo mode, in a browser:** form validation, a successful claim, duplicate, foreign number, the booth flow and auto-return, a syllabus filling up (including the case where the page thought one was left and the server said full), all claimed, before and closed states, the staff login, lockout, search, tabs, refresh and CSV output. Layout checked at 375, 895, 1180, 1366, 1600 and 1920 px wide.
+With `mode: 'demo'`, claims stay in the browser's localStorage, the **DEMO** pill (bottom-left) loads sample data and switches the registration window, and the staff passcode is `demo`.
 
-## What to test on the live setup
+## Tests
 
-These need a real Supabase project, so they have **not** been run:
+```bash
+cd backend-sheets/test
+node test-code.mjs
+```
 
-1. **Simultaneous claims.** In test mode (KSSM cap 3):
-   ```bash
-   cd backend/test
-   SUPABASE_URL=https://xxxx.supabase.co SUPABASE_ANON_KEY=... node race.mjs
-   ```
-   It fires 25 claims at once and expects exactly as many `ok` as there were accounts left. It also checks the public key cannot read any table.
-2. **IP-based lockout.** `admin_list()` reads the caller's IP from the `x-forwarded-for` request header. Confirm a wrong passcode is recorded against your real IP (`select * from admin_attempts`), not `unknown`. If it shows `unknown`, the lockout still works but is shared by everyone.
-3. **End to end on real phones:** scan the QR from the landing page, claim, watch the counter drop within 20 seconds, then check the staff list and a CSV export.
-4. **Booth device:** "Register here", claim, confirm it returns to the landing page and the form is empty for the next visitor.
+96 checks run `Code.gs` against a fake of the Google services: the window, every validation rule, duplicates, the cap, the speed limit and alert, the passcode and lockout, the QR upload, and the menu actions. They prove the logic, not how the real Sheets service behaves, so the live checks in `SETUP.md` still matter.
 
-## Known limits and open points
+## Known limits
 
-- **Bots.** There is a honeypot field but no rate limit or CAPTCHA on claims. Someone scripting the endpoint during the window could burn the allocation with fake emails. Junk rows can be deleted in the Supabase table editor, which frees the slots. Add Turnstile or similar if this is a real concern.
-- **Staff view is read-only.** No edit or delete from the page.
-- **CSV phone numbers start with an apostrophe** (`'+60123456789`). It stops Excel treating `+60…` as a formula. The same guard applies to any cell starting with `=`, `+`, `-` or `@`.
-- **Logo.** The page uses the Parent App icon (`assets/parent-app-logo.svg`), as instructed. The Claude Design mockup (`docs/mockup.pdf`) used the horizontal Tupai wordmark. To swap, change `logo` in `js/config.js`.
-- **Bahasa Malaysia copy** is a draft and needs a native-speaker check before the event. It is all in `js/copy.js`.
-- **Privacy notice** names `johan@tupai.ai` as the contact.
-- **Fonts** load from Google Fonts, so the booth device needs internet (it does anyway, for the backend).
-- The mockup PDF is slightly out of date in two places: it shows a fixed `+60` and a 10am opening time. The build is right; the PDF is a layout reference only.
+- **The QR code is visible to anyone who opens the page**, and the link works from anywhere. Nothing proves a claimant is at the booth. The speed limit, the duplicate block and the cap are the protection, and junk rows can be deleted in the Sheet to free their slots.
+- **The staff lockout is shared.** Apps Script cannot see who is calling, so five wrong passcodes lock the staff view for everyone for 5 minutes. The Sheet's menu can unlock it.
+- **Each claim takes 1 to 3 seconds**, which is how fast Apps Script answers.
+- **CSV phone numbers start with an apostrophe** (`'+60123456789`), which stops Excel treating `+60…` as a formula.
+- **Fonts** load from Google Fonts, so booth devices need internet (they do anyway, for the backend).
+
+## Alternative backend: Supabase
+
+`backend/` holds an equivalent Postgres backend (tables locked down with row-level security, the same rules in one database function, 73 passing tests, and a race test for a live project). It is faster and its staff lockout is per IP address. It does not have the speed limit or the QR upload. To use it, run `backend/schema.sql`, set the passcode with `select public.set_admin_passcode('…')`, and set `mode: 'supabase'` in `js/config.js`.
 
 ## Files
 
 ```
-index.html               page shell
-start-demo.bat           runs the demo locally on Windows
-css/styles.css           all styling (Tupai design tokens)
-js/config.js             demo vs live switch, Supabase URL and key
-js/copy.js               every string, EN and BM
-js/countries.js          country calling codes
-js/validate.js           client-side copy of the validation rules
-js/api.demo.js           demo backend (localStorage)
-js/api.supabase.js       live backend (three RPC calls)
-js/app.js                screens, routing, staff view, CSV
-vendor/qrcode.js         QR generator (qrcode-generator 1.4.4, MIT)
-assets/                  logo
-backend/schema.sql       tables, lock-down, functions
-backend/test-mode.sql    open now, KSSM cap 3
-backend/go-live.sql      clear test rows, real caps and window
-backend/test/            schema tests and the live race test
-docs/mockup.pdf          Claude Design mockup (22 screens)
+index.html                  page shell
+start-demo.bat              runs it locally on Windows
+css/styles.css              all styling (Tupai design tokens)
+js/config.js                which backend, and its address
+js/copy.js                  every string, EN and BM
+js/countries.js             country calling codes
+js/validate.js              client-side copy of the validation rules
+js/api.demo.js              demo backend (localStorage)
+js/api.sheets.js            Google Sheet backend client
+js/api.supabase.js          Supabase backend client
+js/app.js                   screens, routing, staff view, CSV, QR upload
+vendor/qrcode.js            QR generator (qrcode-generator 1.4.4, MIT)
+assets/                     logo
+backend-sheets/Code.gs      the script that lives in the Google Sheet
+backend-sheets/SETUP.md     how to set the Sheet up
+backend-sheets/test/        logic tests
+backend/                    alternative Supabase backend and its tests
+docs/mockup.pdf             Claude Design mockup (layout reference; shows a fixed +60 and 10am, both since changed)
 ```
 
 Icons are Tabler Icons (MIT), inlined as SVG in `js/app.js`.

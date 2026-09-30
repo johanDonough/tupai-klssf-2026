@@ -30,7 +30,8 @@ window.COPY = {
     syllabus:  { en: 'Choose KSSM or IGCSE.', bm: 'Pilih KSSM atau IGCSE.' },
     consent:   { en: 'Tick this box to continue.', bm: 'Tandakan kotak ini untuk teruskan.' },
     full:      { en: '{syl} accounts are all claimed.', bm: 'Akaun {syl} sudah habis.' },
-    generic:   { en: "Something didn't go through. Please check your details and try again.", bm: 'Ada yang tidak berjaya. Sila semak maklumat anda dan cuba lagi.' }
+    generic:   { en: "Something didn't go through. Please check your details and try again.", bm: 'Ada yang tidak berjaya. Sila semak maklumat anda dan cuba lagi.' },
+    busy:      { en: "We're a little busy right now. Please try again in a minute.", bm: 'Kami agak sibuk sekarang. Sila cuba lagi sebentar.' }
   },
   success: {
     title:     { en: 'Claim received.', bm: 'Tuntutan diterima.' },
@@ -70,6 +71,24 @@ window.COPY = {
     noMatch:   'No claims match “{q}”.',
     empty:     "No {tab} claims yet. They'll appear here as visitors register.",
     downloaded:'{what} downloaded',
-    refreshed: 'List refreshed'
+    refreshed: 'List refreshed',
+    qrTitle:   'Booth QR code',
+    qrAuto:    'No image uploaded. The page is drawing its own QR code.',
+    qrCustom:  'Uploaded image. This is what visitors see on the booth screen.',
+    qrLinkLabel: 'The QR code must open this link:',
+    qrCopy:    'Copy link',
+    qrCopied:  'Link copied',
+    qrUpload:  'Upload QR image',
+    qrReplace: 'Replace image',
+    qrRemove:  'Remove image',
+    qrSaving:  'Saving…',
+    qrSaved:   'QR image saved',
+    qrRemoved: 'QR image removed',
+    qrBad:     "That file didn't work. Use a PNG or JPG image of the QR code.",
+    qrTooBig:  'That image is too large. Export a smaller PNG and try again.',
+    qrFailed:  "Couldn't save the image. Try again.",
+    qrMatch:   'Checked: this QR code opens the registration form.',
+    qrMismatch:'Warning: this QR code opens a different link: {url}',
+    qrUnread:  'Scan it with your phone to check it opens the registration form.'
   }
 };

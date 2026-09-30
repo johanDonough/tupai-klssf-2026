@@ -1,16 +1,21 @@
-// The same rules as claim_account() in backend/schema.sql. Keep the two in step.
+// The same rules as validate_() in backend-sheets/Code.gs and claim_account() in backend/schema.sql.
+// Keep them in step.
 // The database is the authority. This copy is for fast feedback and for demo mode.
 window.KlssfValidate = (function () {
   'use strict';
 
+  // A name or email may not begin with = + - or @ (what a spreadsheet formula needs).
+  function cleanName(v) {
+    return String(v || '').replace(/^[\s=+\-@]+/, '').replace(/\s+/g, ' ').trim();
+  }
   function name(v) {
-    var t = String(v || '').trim();
+    var t = cleanName(v);
     return t.length >= 2 && t.length <= 100;
   }
 
   function email(v) {
     var t = String(v || '').trim();
-    return t.length <= 254 && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t);
+    return t.length <= 254 && /^[A-Za-z0-9][^@\s]*@[^@\s]+\.[^@\s]+$/.test(t);
   }
 
   // code: country calling code digits, e.g. "60". national: whatever the visitor typed.
@@ -35,5 +40,5 @@ window.KlssfValidate = (function () {
     return phone(t.slice(0, i), t.slice(i + 1));
   }
 
-  return { name: name, email: email, phone: phone, phoneFromWire: phoneFromWire };
+  return { name: name, cleanName: cleanName, email: email, phone: phone, phoneFromWire: phoneFromWire };
 })();
