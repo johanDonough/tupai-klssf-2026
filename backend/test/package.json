@@ -1,0 +1,11 @@
+{
+  "name": "tupai-klssf-schema-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test-schema.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.16"
+  }
+}

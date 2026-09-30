@@ -1,0 +1,5 @@
+node_modules/
+.claude/
+# Working notes from the planning stage, superseded by README.md and backend/schema.sql
+claude-design-prompt.txt
+lovable-prompts.txt
